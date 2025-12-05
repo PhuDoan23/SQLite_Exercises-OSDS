@@ -12,11 +12,6 @@ TABLE_NAME = 'Medicine_info'
 conn = sqlite3.connect(DB_FILE)
 cursor = conn.cursor()
 
-q0 = f"""
-SELECT * FROM{TABLE_NAME};
-"""
-df0 = pd.read_sql_query(q0, conn)
-print(df0.to_string(index = False))
 
 
 q1 = f"""
@@ -76,13 +71,13 @@ df7 = pd.read_sql_query(q7, conn)
 print(df7.to_string(index = False))
 
 # 2.3 Thống kê theo đơn vị tính
-q8 = f"""
-SELECT unit, COUNT(*) as so_luong 
-FROM {TABLE_NAME} 
-GROUP BY unit;
-"""
-df8 = pd.read_sql_query(q8, conn)
-print(df8.to_string(index = False))
+# q8 = f"""
+# SELECT unit, COUNT(*) as so_luong 
+# FROM {TABLE_NAME} 
+# GROUP BY unit;
+# """
+# df8 = pd.read_sql_query(q8, conn)
+# print(df8.to_string(index = False))
 
 # 2.4 Tìm kiếm sản phẩm "Vitamin C"
 q9 = f"""
@@ -170,5 +165,6 @@ WHERE rowid NOT IN (
 );
 """
 
-df15 = pd.read_sql_query(q15, conn)
-print(df15.to_string(index = False))
+cursor.execute(q15)
+conn.commit()
+print("Da xoa cac ban ghi trung lap.")

@@ -100,6 +100,7 @@ CREATE TABLE IF NOT EXISTS {TABLE_NAME}(
     stt INTEGER PRIMARY KEY,
     name TEXT,
     price TEXT,
+    orgin_price TEXT,
     img TEXT
 );
 """
