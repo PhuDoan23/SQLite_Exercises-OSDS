@@ -7,6 +7,7 @@ from pathlib import Path
 import os
 import time
 import pandas as pd
+import re
 
 
 """
@@ -81,7 +82,7 @@ III. Yêu Cầu Phân Tích Dữ Liệu (Query/Truy Vấn)
 
 
 # --- SETUP DATABASE ---
-DB_FILE = 'Medicine_Data.db'
+DB_FILE = 'longchau_db.sqlite'
 TABLE_NAME = 'Medicine_info'
 
 if os.path.exists(DB_FILE):
@@ -97,10 +98,13 @@ cursor = conn.cursor()
 # Fix 1: Added 'S' to EXISTS and ensured column names are consistent
 create_table_sql = f"""
 CREATE TABLE IF NOT EXISTS {TABLE_NAME}(
-    stt INTEGER PRIMARY KEY,
-    name TEXT,
-    price TEXT,
-    orgin_price TEXT,
+    stt INTEGER PRIMARY KEY AUTOINCREMENT,
+    product_id TEXT,
+    product_name TEXT,
+    price REAL,
+    original_price REAL,
+    unit TEXT,
+    product_url TEXT UNIQUE,
     img TEXT
 );
 """
@@ -158,6 +162,53 @@ try:
     print(f"Tim thay {len(buttons)} san pham.")
 
     # --- EXTRACTION LOOP ---
+    # helper functions
+    def parse_price(text: str) -> float:
+        if not text:
+            return 0.0
+        # remove non-digit chars except dot and comma, then normalize
+        num = re.sub(r"[^0-9,\.]", "", text)
+        num = num.replace('.', '').replace(',', '')
+        try:
+            return float(num) if num else 0.0
+        except:
+            return 0.0
+
+    def extract_unit(sp) -> str:
+        # Look for common Vietnamese unit words nearby
+        try:
+            text = sp.text
+            # simple heuristics
+            m = re.search(r"\b(Hộp|Chai|Vỉ|Viên|Gói)\b", text)
+            if m:
+                return m.group(1)
+        except:
+            pass
+        # look for explicit span elements that might contain unit
+        try:
+            candidates = sp.find_elements(By.XPATH, ".//span|.//p|.//div")
+            for c in candidates:
+                t = c.text
+                if t and re.search(r"\b(Hộp|Chai|Vỉ|Viên|Gói)\b", t):
+                    m = re.search(r"\b(Hộp|Chai|Vỉ|Viên|Gói)\b", t)
+                    return m.group(1)
+        except:
+            pass
+        return ""
+
+    def extract_product_id_from_url(url: str) -> str:
+        if not url:
+            return ""
+        # try to find numeric id segments in URL
+        # examples: .../some-product-123456, .../p/123456, query id=123
+        m = re.search(r"(?:-|/)(\d{4,})(?:$|/|\D)", url)
+        if m:
+            return m.group(1)
+        m2 = re.search(r"id=(\d+)", url)
+        if m2:
+            return m2.group(1)
+        return ""
+
     count = 0
     for i, bt in enumerate(buttons, 1):
         try:
@@ -192,15 +243,52 @@ try:
             except:
                 img_src = ""
 
+            # product_url extraction: try to find anchor inside the product container
+            product_url = ""
+            try:
+                a = sp.find_element(By.TAG_NAME, 'a')
+                product_url = a.get_attribute('href') or ''
+            except:
+                # fallback: look for any href in descendants
+                try:
+                    a2 = sp.find_element(By.XPATH, ".//a[@href]")
+                    product_url = a2.get_attribute('href') or ''
+                except:
+                    product_url = ''
+
+            # product_id extraction heuristics
+            product_id = ""
+            try:
+                # check data attributes on button or container
+                data_id = bt.get_attribute('data-product-id') or bt.get_attribute('data-id')
+                if data_id:
+                    product_id = data_id
+                else:
+                    product_id = extract_product_id_from_url(product_url)
+            except:
+                product_id = extract_product_id_from_url(product_url)
+
+            # parse numeric prices
+            price_val = parse_price(price_text)
+            original_price_val = parse_price(original_price_text)
+
+            # extract unit
+            unit_val = extract_unit(sp)
+
             if name_text:
                 # Fix 2: Insert INDIVIDUAL values, not the list variables
                 insert_sql = f"""
-                INSERT OR IGNORE INTO {TABLE_NAME} (stt, name, price, orgin_price, img)
-                VALUES (?, ?, ?, ?, ?);
+                INSERT OR IGNORE INTO {TABLE_NAME} (product_id, product_name, price, original_price, unit, product_url, img)
+                VALUES (?, ?, ?, ?, ?, ?, ?);
                 """
-                cursor.execute(insert_sql, (i, name_text, price_text, original_price_text, img_src))
-                count += 1
-                print(f"Saved: {name_text[:30]}...")
+                cursor.execute(insert_sql, (product_id, name_text, price_val, original_price_val, unit_val, product_url, img_src))
+                if cursor.rowcount != 0:
+                    count += 1
+                    print(f"Saved: {name_text[:40]} | id={product_id} | url={product_url}")
+                else:
+                    print(f"Skipped (exists): {name_text[:40]} | url={product_url}")
+                # commit after each insert to satisfy 'save immediately' requirement
+                conn.commit()
 
         except Exception as e:
             print(f"Error extracting item {i}: {e}")
